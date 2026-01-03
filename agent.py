@@ -2,7 +2,7 @@ import operator
 from typing import Annotated, Dict, TypedDict, Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph, START, END
 
 
 llm = ChatOllama(model="qwen3:8b", temperature=0)
@@ -133,12 +133,19 @@ workflow.add_node("extract_candidate_profile_information", extract_candidate_pro
 workflow.add_node("extract_receiver_profile_information", extract_receiver_profile_information)
 workflow.add_node("write_a_referral_pitch", write_a_referral_pitch)
 
-# Add Logic (Linear Flow)
-workflow.set_entry_point("get_candidate_profile_content")
-workflow.add_edge("get_candidate_profile_content", "get_receiver_profile_content")
-workflow.add_edge("get_receiver_profile_content", "extract_candidate_profile_information")
-workflow.add_edge("extract_candidate_profile_information", "extract_receiver_profile_information")
+# Add Logic (Parallel Flow)
+# Both scrapers run in parallel from START
+workflow.add_edge(START, "get_candidate_profile_content")
+workflow.add_edge(START, "get_receiver_profile_content")
+
+# Each extractor runs after its respective scraper
+workflow.add_edge("get_candidate_profile_content", "extract_candidate_profile_information")
+workflow.add_edge("get_receiver_profile_content", "extract_receiver_profile_information")
+
+# Both extractions converge at write_a_referral_pitch
+workflow.add_edge("extract_candidate_profile_information", "write_a_referral_pitch")
 workflow.add_edge("extract_receiver_profile_information", "write_a_referral_pitch")
+
 workflow.add_edge("write_a_referral_pitch", END)
 
 
@@ -153,7 +160,7 @@ if __name__ == "__main__":
         "receiver_url": "https://linkedin.com/in/zach-johnson"
     }
 
-    print("🚀 STARTING AGENTIC WORKFLOW...\n")
+    print(" STARTING AGENTIC WORKFLOW...\n")
     
    
     result = app.invoke(inputs)
