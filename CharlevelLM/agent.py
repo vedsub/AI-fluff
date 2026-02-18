@@ -3,16 +3,20 @@ import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import random
+import os
 
 # For reproducibility (same seed as article)
 gen = torch.Generator().manual_seed(2147483647)
 
 # Load data (article uses Michael Jackson lyrics)
-words = open('data.txt', 'r').read().splitlines()   # better than .split() for lines
+_dir = os.path.dirname(os.path.abspath(__file__))
+words = open(os.path.join(_dir, 'data.txt'), 'r').read().splitlines()   # better than .split() for lines
+words = [w for w in words if w]  # filter out empty lines
 text = ''.join(words)   # or keep as list of words — both work
 
-# Vocabulary (same as article)
+# Vocabulary (same as article) — '.' is the special start/end token
 chars = sorted(list(set(text)))
+chars = ['.'] + chars   # ensure '.' is in vocab at index 0
 vocab_size = len(chars)
 ctoi = {ch: i for i, ch in enumerate(chars)}
 itoc = {i: ch for ch, i in ctoi.items()}
@@ -108,6 +112,7 @@ class TrigramMLP(nn.Module):
     def __init__(self, vocab_size, block_size=3, embed_dim=32, hidden_dim=200):
         super().__init__()
         self.block_size = block_size
+        self.embed_dim = embed_dim
         self.embed = nn.Embedding(vocab_size, embed_dim)
         self.net = nn.Sequential(
             nn.Linear(embed_dim * block_size, hidden_dim),
@@ -120,7 +125,7 @@ class TrigramMLP(nn.Module):
     def forward(self, x, targets=None):
         # x: (B, block_size)
         emb = self.embed(x)                     # (B, block_size, embed_dim)
-        x = emb.view(-1, embed_dim * self.block_size)  # flatten
+        x = emb.view(-1, self.embed_dim * self.block_size)  # flatten
         logits = self.net(x)                    # (B, vocab_size)
         
         if targets is None:
@@ -134,7 +139,7 @@ class TrigramMLP(nn.Module):
         out = []
         for _ in range(max_new_tokens):
             logits, _ = self(context)
-            logits = logits[:, -1, :] / temperature
+            logits = logits / temperature
             probs = F.softmax(logits, dim=-1)
             idx_next = torch.multinomial(probs, num_samples=1, generator=gen)
             context = torch.cat((context[:, 1:], idx_next), dim=1)
