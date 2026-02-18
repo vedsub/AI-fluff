@@ -87,27 +87,41 @@ class MLP_Part2(nn.Module):
         return ''.join(out)
 
 # 4. PREPARE DATASET
+# 4. PREPARE DATASET (SPLIT INTO TRAIN / DEV / TEST)
 block_size = 3
-X, Y = [], []
-for word in words:
-    context = [ctoi['.']] * block_size
-    for ch in word + '.':
-        X.append(context)
-        Y.append(ctoi[ch])
-        context = context[1:] + [ctoi[ch]]
 
-X = torch.tensor(X)
-Y = torch.tensor(Y)
+def build_dataset(words):
+    X, Y = [], []
+    for w in words:
+        context = [ctoi['.']] * block_size
+        for ch in w + '.':
+            X.append(context)
+            Y.append(ctoi[ch])
+            context = context[1:] + [ctoi[ch]]
+    return torch.tensor(X), torch.tensor(Y)
 
+import random
+random.seed(42)
+random.shuffle(words)
+n1 = int(0.8 * len(words))
+n2 = int(0.9 * len(words))
+
+Xtr, Ytr = build_dataset(words[:n1])     # 80% Training
+Xdev, Ydev = build_dataset(words[n1:n2]) # 10% Validation (Dev)
+Xte, Yte = build_dataset(words[n2:])     # 10% Test
+
+print(f"Train size: {len(Xtr)} | Val size: {len(Xdev)} | Test size: {len(Xte)}")
+
+# Training Loop
 # 5. INSTANTIATE AND TRAIN
-print(f"Training on {len(X)} examples...")
 model = MLP_Part2(vocab_size, block_size=block_size)
 optimizer = torch.optim.AdamW(model.parameters(), lr=0.1)
 
-# Training Loop
-for step in range(5000): # 5000 steps is usually enough for this small model
-    idxs = torch.randint(0, len(X), (32,))
-    xb, yb = X[idxs], Y[idxs]
+print("Starting training...")
+for step in range(10000): # Increased steps for better convergence
+    # CRITICAL: Sample only from Xtr (Training Set)
+    idxs = torch.randint(0, len(Xtr), (32,))
+    xb, yb = Xtr[idxs], Ytr[idxs]
     
     logits, loss = model(xb, yb)
     
@@ -115,13 +129,31 @@ for step in range(5000): # 5000 steps is usually enough for this small model
     loss.backward()
     optimizer.step()
     
-    # Simple learning rate decay
-    if step == 2500:
+    # Decay learning rate at step 5000
+    if step == 5000:
         for g in optimizer.param_groups:
             g['lr'] = 0.01
             
-    if step % 500 == 0:
-        print(f"step {step:5d} | loss {loss.item():.4f}")
+    if step % 1000 == 0:
+        print(f"step {step:5d} | train loss {loss.item():.4f}")
+
+# 6. EVALUATION
+@torch.no_grad()
+def split_loss(split):
+    model.eval() # Switch to eval mode
+    x, y = {
+        'train': (Xtr, Ytr),
+        'val':   (Xdev, Ydev),
+        'test':  (Xte, Yte),
+    }[split]
+    logits, loss = model(x, y)
+    print(f"{split} loss: {loss.item():.4f}")
+    model.train() # Switch back to train mode
+
+print("\n--- Evaluation ---")
+split_loss('train')
+split_loss('val') 
+# If 'val' loss is much higher than 'train' loss, you are overfitting.
 
 # 6. GENERATE
 print("\nGenerated Output:")
