@@ -60,6 +60,8 @@ for word in words[:100]:   # or all words
         n += 1
 
 print(f"Avg NLL (count-based): {-log_lik / n:.4f}")
+
+
 class NeuralBigram(nn.Module):
     def __init__(self, vocab_size):
         super().__init__()
@@ -176,3 +178,69 @@ for step in range(30000):
         print(f"step {step:5d} | loss {loss.item():.4f}")
 
 print("Generated:", model.generate(max_new_tokens=400, temperature=0.85))
+
+
+
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class MLP_Part2(nn.Module):
+    def __init__(self, vocab_size, block_size=3, embed_dim=10, hidden_dim=200):
+        super().__init__()
+        self.block_size = block_size
+        self.embed_dim = embed_dim
+        
+        self.embed = nn.Embedding(vocab_size, embed_dim)
+        
+        # Layers
+        self.linear1 = nn.Linear(embed_dim * block_size, hidden_dim, bias=False)
+        self.bn1 = nn.BatchNorm1d(hidden_dim) # Batch Normalization
+        self.tanh = nn.Tanh()
+        self.linear2 = nn.Linear(hidden_dim, vocab_size)
+
+        # --- PART 2: SMART INITIALIZATION ---
+        with torch.no_grad():
+            # 1. Kaiming Init (Gain / sqrt(fan_in))
+            # This prevents the "vanishing gradient" in Tanh layers
+            self.linear1.weight *= (5/3) / ((embed_dim * block_size)**0.5)
+            
+            # 2. Fix the "Hockey Stick" Loss
+            # We make the output layer weights very small so the initial 
+            # probability distribution is uniform (loss ≈ 3.2 for 27 chars)
+            self.linear2.weight *= 0.1
+            self.linear2.bias *= 0 
+
+    def forward(self, x, targets=None):
+        emb = self.embed(x) # (B, block_size, embed_dim)
+        x = emb.view(-1, self.embed_dim * self.block_size)
+        
+        # Apply Linear -> BatchNorm -> Tanh
+        x = self.linear1(x)
+        x = self.bn1(x) 
+        x = self.tanh(x)
+        
+        logits = self.linear2(x)
+        
+        if targets is None:
+            return logits, None
+        
+        loss = F.cross_entropy(logits, targets)
+        return logits, loss
+
+    @torch.no_grad()
+    def generate(self, itoc, ctoi, max_new_tokens=100):
+        self.eval() # Set to eval mode for BatchNorm
+        context = [0] * self.block_size
+        out = []
+        for _ in range(max_new_tokens):
+            x = torch.tensor([context])
+            logits, _ = self(x)
+            probs = F.softmax(logits, dim=-1)
+            ix = torch.multinomial(probs, num_samples=1).item()
+            context = context[1:] + [ix]
+            out.append(itoc[ix])
+            if ix == 0: break
+        self.train()
+        return ''.join(out)
